@@ -25,7 +25,7 @@ def handle_sensor_connection(conn):
 def connect_to_central(taxi_id):
     """Conectar el Digital Engine a la central y recibir comandos."""
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(('192.168.x.x', 8080))  # IP de la Central
+    client.connect(('172.21.243.238', 8087))  # IP de la Central
 
     # Iniciar el taxi enviando ID y acción INIT
     init_message = f"{taxi_id}#INIT"
@@ -42,9 +42,9 @@ def connect_to_central(taxi_id):
 def start_engine():
     """Iniciar el servidor del Digital Engine para recibir datos del sensor."""
     engine = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    engine.bind(('0.0.0.0', 9090))  # Escuchar conexiones del sensor
+    engine.bind(('172.21.243.240', 8087))  # Escuchar conexiones del sensor
     engine.listen(5)
-    print("Digital Engine esperando conexión del sensor...")
+    print("Taxi esperando conexión del sensor...")
 
     while True:
         conn, addr = engine.accept()
@@ -55,4 +55,3 @@ if __name__ == "__main__":
     taxi_id = 1
     start_engine()
     connect_to_central(taxi_id)
-
