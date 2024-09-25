@@ -24,6 +24,6 @@ def connect_to_engine(engine_ip, engine_port):
         sensor.close()
 
 if __name__ == "__main__":
-    engine_ip = '192.168.x.x'  # Cambia por la IP de EC_DE
-    engine_port = 9090  # Puerto donde EC_DE estará escuchando
+    engine_ip = '172.21.243.238'  # Cambia por la IP de EC_DE
+    engine_port = 8087  # Puerto donde EC_DE estará escuchando
     connect_to_engine(engine_ip, engine_port)
