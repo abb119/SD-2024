@@ -15,3 +15,11 @@ python -m pip install kafka-python==2.0.0
 cambiar en env\Lib\site-packages\kafka\codec.py:
 from kafka.vendor import six
 from six.moves import range
+
+
+def obtener_taxi_disponible():
+    taxis = cargar_taxis_db()
+    for taxi in taxis:
+        if taxi['estado'] == "AVAILABLE":
+            return taxi
+    return None
