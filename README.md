@@ -18,3 +18,4 @@ from six.moves import range
 
 
 
+Ahora tengo el mismo problema que hemos solucionado antes. cuando el sensor del taxi detecta un peaton o un semaforo se lo evia a taxi y taxi le envia a central el estado de taxi stop, luego central cambia el estado del taxi a stop en la base de datos. Cuando sensor vuelve a ok, taxi vuelve a ok y le manda a central el estado de taxi run para que se lo cambie en la base datos (cuando el taxi se mueve su estado es run). Arregla esto porque a central no llega nada.
