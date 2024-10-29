@@ -34,22 +34,27 @@ def change_sensor_status():
 
 
 def connect_to_engine(engine_ip, engine_port):
-   """Conectar el sensor al Digital Engine y enviar mensajes de estado."""
-   sensor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-   sensor.connect((engine_ip, engine_port))
+    """Conectar el sensor al Digital Engine y enviar mensajes de estado."""
+    sensor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        print(f"Intentando conectar con {engine_ip}:{engine_port}...")
+        sensor.connect((engine_ip, engine_port))
+        print(f"Conexión establecida con {engine_ip}:{engine_port}")
+    except Exception as e:
+        print(f"Error al conectar el sensor: {e}")
+        return
+    try:
+        sensor_gen = simulate_sensor()  # Generador para el estado del sensor
+        while True:
+            # Obtener el siguiente estado del sensor y enviarlo al Digital Engine
+            sensor_status = next(sensor_gen)
+            sensor.send(sensor_status.encode())
+            print(f"Sensor envía estado: {sensor_status}")
+    except Exception as e:
+        print(f"Error en el sensor: {e}")
+    finally:
+        sensor.close()
 
-
-   try:
-       sensor_gen = simulate_sensor()  # Generador para el estado del sensor
-       while True:
-           # Obtener el siguiente estado del sensor y enviarlo al Digital Engine
-           sensor_status = next(sensor_gen)
-           sensor.send(sensor_status.encode())
-           print(f"Sensor envía estado: {sensor_status}")
-   except Exception as e:
-       print(f"Error en el sensor: {e}")
-   finally:
-       sensor.close()
 
 
 if __name__ == "__main__":
