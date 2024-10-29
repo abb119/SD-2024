@@ -18,3 +18,7 @@ from six.moves import range
 
 
 
+
+cuando se ejecuta central, que aparezcan las localizaciones en el mapa
+colores de taxi ocupado
+sensor
