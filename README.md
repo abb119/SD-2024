@@ -18,7 +18,7 @@ from six.moves import range
 
 
 
-
+destino pasa a ser inicio del cliente
 cuando se ejecuta central, que aparezcan las localizaciones en el mapa
 colores de taxi ocupado
 sensor
