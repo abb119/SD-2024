@@ -19,3 +19,14 @@ from six.moves import range
 
 
 Ahora tengo el mismo problema que hemos solucionado antes. cuando el sensor del taxi detecta un peaton o un semaforo se lo evia a taxi y taxi le envia a central el estado de taxi stop, luego central cambia el estado del taxi a stop en la base de datos. Cuando sensor vuelve a ok, taxi vuelve a ok y le manda a central el estado de taxi run para que se lo cambie en la base datos (cuando el taxi se mueve su estado es run). Arregla esto porque a central no llega nada.
+
+
+alumno@clLLIBRE1-17:~/Escritorio/SD-2024$ python3 EC_DE.py 1 172.21.42.10 8087 172.21.42.10 9092 172.21.42.11 8089
+Respuesta de la central: OK#Taxi autenticado y listo
+Taxi 1 ha enviado estado: AVAILABLE, RUN
+Taxi 1 autenticado con éxito y ahora está disponible.
+Taxi 1 esperando solicitudes de servicio vía Kafka...
+Intentando vincular el sensor:
+IP: 172.21.42.11, Puerto: 8089
+Taxi está escuchando conexiones del sensor en el puerto 8089...
+Debug: Solicitud recibida desde Kafka: {'taxi_id': 1, 'mensaje': 'NUEVO_SERVICIO', 'origen': [5, 5], 'destino': [5, 3]}
