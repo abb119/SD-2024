@@ -17,23 +17,27 @@ producer = None
 consumer = None
 
 def setup_kafka():
-    """Configurar el productor y consumidor de Kafka."""
     global producer, consumer
+    try:
+        # Configuración del productor
+        producer = KafkaProducer(
+            bootstrap_servers=f'{broker_ip}:{broker_port}',
+            value_serializer=lambda v: json.dumps(v).encode('utf-8')
+        )
 
-    # Configuración del productor
-    producer = KafkaProducer(
-        bootstrap_servers=f'{broker_ip}:{broker_port}',
-        value_serializer=lambda v: json.dumps(v).encode('utf-8')
-    )
+        # Configuración del consumidor
+        consumer = KafkaConsumer(
+            f'respuesta_cliente_{customer_id}',
+            bootstrap_servers=f'{broker_ip}:{broker_port}',
+            auto_offset_reset='latest',
+            group_id=f'customer_group_{customer_id}',
+            value_deserializer=lambda v: json.loads(v.decode('utf-8'))
+        )
+        print(f"Cliente {customer_id} conectado a Kafka correctamente.")
+    except Exception as e:
+        print(f"Error al configurar Kafka en el cliente {customer_id}: {e}")
 
-    # Configuración del consumidor
-    consumer = KafkaConsumer(
-        'respuestas_central',
-        bootstrap_servers=f'{broker_ip}:{broker_port}',
-        auto_offset_reset='latest',
-        group_id=f'customer_group_{customer_id}',
-        value_deserializer=lambda v: json.loads(v.decode('utf-8'))
-    )
+
 
 def cliente_existe(cliente_id):
     """Verificar si el cliente existe en la base de datos."""
@@ -79,20 +83,20 @@ def wait_for_response():
     taxi_assigned = False
     for message in consumer:
         data = message.value
-        if data.get("customer_id") == customer_id:
-            if data.get("status") == "OK" and not taxi_assigned:
-                print(f"Respuesta recibida de la central: {data}")
-                print("Taxi asignado. Esperando finalización del viaje...")
-                taxi_assigned = True
-            elif data.get("status") == "TRIP_COMPLETED" and taxi_assigned:
-                print(f"Respuesta recibida de la central: {data}")
-                print("Viaje completado.")
-                return True
-            elif data.get("status") == "NO_TAXI_AVAILABLE" and not taxi_assigned:
-                print(f"Respuesta recibida de la central: {data}")
-                print("No hay taxis disponibles.")
-                return False
-            # Ignorar mensajes no relevantes después de asignar taxi
+        if data.get("status") == "OK" and not taxi_assigned:
+            print(f"Respuesta recibida de la central: {data}")
+            print("Taxi asignado. Esperando finalización del viaje...")
+            taxi_assigned = True
+        elif data.get("status") == "TRIP_COMPLETED" and taxi_assigned:
+            print(f"Respuesta recibida de la central: {data}")
+            print("Viaje completado.")
+            return True
+        elif data.get("status") == "NO_TAXI_AVAILABLE" and not taxi_assigned:
+            print(f"Respuesta recibida de la central: {data}")
+            print("No hay taxis disponibles.")
+            return False
+        # Otras respuestas pueden ser manejadas aquí si es necesario
+
           
 
 
