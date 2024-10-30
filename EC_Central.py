@@ -6,6 +6,7 @@ from kafka import KafkaProducer, KafkaConsumer
 import json
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import os  # Importar os para operaciones de archivo
 
 LOCATIONS_DB_FILE = 'EC_Locations.json' 
 producer = None  # Productor de Kafka para enviar respuestas
@@ -13,17 +14,24 @@ TAXIS_DB_FILE = 'taxis_db.json'
 mapa_queue = queue.Queue()
 CLIENTES_DB_FILE = 'clientes_db.json'
 
+# Definir los locks
+taxis_db_lock = threading.Lock()
+clientes_db_lock = threading.Lock()  # Si es necesario para clientes
 # Función para cargar la base de datos de clientes
 def cargar_clientes_db():
-    try:
-        with open(CLIENTES_DB_FILE, 'r') as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return {}
+    with clientes_db_lock:
+        try:
+            with open(CLIENTES_DB_FILE, 'r') as file:
+                return json.load(file)
+        except FileNotFoundError:
+            return {}
 
 def guardar_clientes_db(clientes):
-    with open(CLIENTES_DB_FILE, 'w') as file:
-        json.dump(clientes, file, indent=4)
+    with clientes_db_lock:
+        temp_file = CLIENTES_DB_FILE + '.tmp'
+        with open(temp_file, 'w') as file:
+            json.dump(clientes, file, indent=4)
+        os.replace(temp_file, CLIENTES_DB_FILE)
 
 def agregar_o_actualizar_cliente(cliente_id, localizacion=[0, 0], recogido=False, destination=None):
     clientes = cargar_clientes_db()
@@ -64,13 +72,17 @@ def obtener_coordenadas_por_id(destino_id):
     return None
 
 # Ejemplo de cómo utilizar estas funciones en el contexto actual
-def actualizar_estado_cliente(cliente_id, recogido, destination=None):
+def actualizar_estado_cliente(cliente_id, recogido, destination=None, localizacion=None):
     clientes = cargar_clientes_db()
     if str(cliente_id) in clientes:
         clientes[str(cliente_id)]['recogido'] = recogido
-        if destination:
+        if destination is not None:
             clientes[str(cliente_id)]['destination'] = destination
+        if localizacion is not None:
+            clientes[str(cliente_id)]['localizacion'] = localizacion
         guardar_clientes_db(clientes)
+
+
         
 # Configuración del productor de Kafka
 def setup_kafka(broker_ip, broker_port):
@@ -84,15 +96,20 @@ def setup_kafka(broker_ip, broker_port):
 
 # Funciones para la Base de Datos JSON
 def cargar_taxis_db():
-    try:
-        with open(TAXIS_DB_FILE, 'r') as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return []
+    with taxis_db_lock:
+        try:
+            with open(TAXIS_DB_FILE, 'r') as file:
+                return json.load(file)
+        except FileNotFoundError:
+            return []
 
 def guardar_taxis_db(taxis):
-    with open(TAXIS_DB_FILE, 'w') as file:
-        json.dump(taxis, file, indent=4)
+    with taxis_db_lock:
+        temp_file = TAXIS_DB_FILE + '.tmp'
+        with open(temp_file, 'w') as file:
+            json.dump(taxis, file, indent=4)
+        os.replace(temp_file, TAXIS_DB_FILE)
+
 
 def obtener_taxi_por_id(taxi_id):
     taxis = cargar_taxis_db()
@@ -154,7 +171,7 @@ def mostrar_mapa_grafico():
         for y in range(20):
             ax.add_patch(patches.Rectangle((x, y), 1, 1, fill=True, facecolor='white', edgecolor='black'))
 
-        def actualizar_mapa():
+    def actualizar_mapa():
             ax.clear()
             ax.set_xlim(0, 20)
             ax.set_ylim(0, 20)
@@ -186,6 +203,7 @@ def mostrar_mapa_grafico():
                     ax.add_patch(patches.Rectangle((x, y), 1, 1, fill=True, facecolor='yellow', edgecolor='black'))
                     ax.text(x + 0.5, y + 0.5, str(cliente_id).lower(), ha='center', va='center', fontsize=12, color='black', weight='bold')
 
+
                 # Optionally, remove this section if destinations are already displayed
                 # if 'destination' in cliente and cliente['destination'] is not None:
                 #     dest_x, dest_y = cliente['destination']
@@ -202,7 +220,7 @@ def mostrar_mapa_grafico():
                     x = x % 20
                     y = y % 20
                     # Determine color based on taxi movement status
-                    color = 'green' if taxi['movement'] == "RUN" else 'red'
+                    color = 'green' if taxi['availability'] == "AVAILABLE" else 'red'
                     ax.add_patch(patches.Rectangle((x, y), 1, 1, fill=True, facecolor=color, edgecolor='black'))
                     ax.text(x + 0.5, y + 0.5, str(taxi['id']), ha='center', va='center', fontsize=12, color='white', weight='bold')
 
@@ -328,7 +346,7 @@ def recibir_solicitudes_taxis():
         'taxi_status',
         bootstrap_servers=f'{broker_ip}:{broker_port}',
         auto_offset_reset='earliest',
-        group_id='central_group',
+        group_id='central_taxi_status_group',
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
     print("Central escuchando estados de taxis vía Kafka...")
@@ -344,7 +362,7 @@ def procesar_solicitudes_clientes():
         'solicitudes_taxi',
         bootstrap_servers=f'{broker_ip}:{broker_port}',
         auto_offset_reset='earliest',
-        group_id='central_group',
+        group_id='central_solicitudes_group',
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
     print("Central escuchando solicitudes de clientes...")
@@ -384,8 +402,9 @@ def procesar_solicitud_cliente(solicitud):
             "status": "OK",
             "mensaje": f"Taxi {taxi_id} ha sido asignado y se dirige a su ubicación."
         }
-        actualizar_estado_y_posicion_taxi(taxi_id, availability="BUSY")  # Actualizar posición inicial del taxi
+        actualizar_estado_y_posicion_taxi(taxi_id, availability="BUSY")  # Actualizar estado del taxi
         enviar_solicitud_taxi(taxi_id, cliente_id, origen, destino_coordenadas)
+        enviar_notificacion_cliente(response)  # Enviar respuesta al cliente
     else:
         print(f"No hay taxis disponibles para el cliente {cliente_id}")
         response = {
@@ -393,8 +412,10 @@ def procesar_solicitud_cliente(solicitud):
             "status": "NO_TAXI_AVAILABLE",
             "mensaje": "Lo sentimos, no hay taxis disponibles en este momento."
         }
-    producer.send('respuestas_central', value=response)
-    producer.flush()
+        enviar_notificacion_cliente(response)  # Enviar respuesta al cliente
+
+    # No es necesario llamar a producer.flush() aquí, se maneja dentro de enviar_notificacion_cliente()
+
 
 
 
@@ -421,27 +442,47 @@ def enviar_solicitud_taxi(taxi_id,cliente_id, origen, destino):
     except Exception as e:
         print(f"Error al enviar solicitud de servicio a taxi {taxi_id}: {e}")
 
+
 def recibir_notificaciones_viajes():
     consumer = KafkaConsumer(
         'trip_status',
         bootstrap_servers=f'{broker_ip}:{broker_port}',
         auto_offset_reset='earliest',
-        group_id='central_group',
+        group_id='central_trip_status_group',
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
-    print("Central escuchando notificaciones de viajes completados...")
+    print("Central escuchando notificaciones de viajes...")
     for mensaje in consumer:
         data = mensaje.value
         if data.get("status") == "TRIP_COMPLETED":
             print(f"Notificación de viaje completado recibida: {data}")
+            # Actualizar la posición y estado del cliente
+            actualizar_estado_cliente(
+                cliente_id=data['customer_id'],
+                recogido=False,
+                localizacion=data['destination']
+            )
             enviar_notificacion_cliente(data)
+            mapa_queue.put("update")
+        elif data.get("status") == "PICKED_UP":
+            print(f"Notificación de cliente recogido recibida: {data}")
+            # Establecer 'recogido' en True para el cliente
+            actualizar_estado_cliente(
+                cliente_id=data['customer_id'],
+                recogido=True
+            )
+            mapa_queue.put("update")
+
+
 
 
 def enviar_notificacion_cliente(data):
     try:
-        producer.send('respuestas_central', value=data)
+        customer_id = data['customer_id']
+        topic = f'respuesta_cliente_{customer_id}'  # Tópico específico para el cliente
+        producer.send(topic, value=data)
         producer.flush()
-        print(f"Notificación de viaje completado enviada al cliente {data['customer_id']}.")
+        print(f"Notificación enviada al cliente {customer_id} en el tópico {topic}.")
     except Exception as e:
         print(f"Error al enviar notificación al cliente: {e}")
 
