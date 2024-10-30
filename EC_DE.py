@@ -18,9 +18,10 @@ authenticated = False  # Estado de autenticación
 producer = None
 consumer = None
 availability_status = "BUSY"  # Estado de disponibilidad del taxi (AVAILABLE/BUSY)
-movement_status = "RUN"  # Estado de movimiento del taxi (RUN/STOP)
 current_position = [0, 0]  # Posición inicial del taxi
 request_queue = queue.Queue()  # Cola para manejar solicitudes de servicio
+movement_event = threading.Event()  # Evento para controlar el movimiento
+movement_event.set()  # Inicialmente, el taxi puede moverse
 
 # Configuración de Kafka
 def setup_kafka(broker_ip, broker_port):
@@ -48,7 +49,7 @@ def autenticar_taxi_con_central():
                 "taxi_id": taxi_id,
                 "position": current_position,
                 "availability": availability_status,
-                "movement": movement_status
+                "movement": "RUN" if movement_event.is_set() else "STOP"
             })
 
             s.send(mensaje_autenticacion.encode())
@@ -72,7 +73,7 @@ def recibir_solicitudes_kafka():
             for mensaje in consumer:
                 solicitud = mensaje.value
                 print(f"Debug: Solicitud recibida desde Kafka: {solicitud}")
-                print(f"TAXI CABRON: {solicitud.get("taxi_id") }")
+                
                 if str(solicitud.get("taxi_id")) == taxi_id:
                     print(f"Colocando solicitud en la cola para procesarla: {solicitud}")
                     request_queue.put(solicitud)
@@ -92,16 +93,17 @@ def manejar_solicitud(solicitud):
     if solicitud.get("mensaje") == "NUEVO_SERVICIO":
         origen = solicitud.get("origen")
         destino = solicitud.get("destino")
-        cliente_id = solicitud.get("customer_id")  # Get customer_id
+        cliente_id = solicitud.get("customer_id")
         print(f"Taxi {taxi_id} recibió solicitud para recoger en {origen} y llevar al destino {destino}")
         availability_status = "BUSY"
-        enviar_estado()  # Send updated status before starting the trip
-        realizar_viaje(origen, destino, cliente_id)  # Pass cliente_id
+        enviar_estado()  # Enviar estado actualizado antes de iniciar el viaje
+        realizar_viaje(origen, destino, cliente_id)
+
 def enviar_estado():
     message = {
         "taxi_id": taxi_id,
         "availability": availability_status,
-        "movement": movement_status,
+        "movement": "RUN" if movement_event.is_set() else "STOP",
         "localizacion": current_position
     }
     try:
@@ -111,19 +113,23 @@ def enviar_estado():
     except Exception as e:
         print(f"Error al enviar estado a Kafka: {e}")
 
-
 def actualizar_posicion_taxi(posicion):
-    """Actualizar la posición del taxi en la base de datos central."""
     global current_position
     current_position = posicion
     enviar_estado()
 
 def mover_taxi(destino):
-    global movement_status
+    global movement_event
     destino_coords = destino
     print(f"Iniciando movimiento hacia {destino_coords}")
     while current_position != destino_coords:
-        # Lógica de movimiento sin verificaciones adicionales
+        # Esperar hasta que el movimiento esté permitido
+        if not movement_event.is_set():
+            print(f"Taxi {taxi_id} detenido en la posición: {current_position} debido a movement_status = STOP")
+            movement_event.wait()
+            print(f"Taxi {taxi_id} reanudando movimiento.")
+
+        # Continuar con el movimiento
         if current_position[0] < destino_coords[0]:
             current_position[0] = (current_position[0] + 1) % 20
         elif current_position[0] > destino_coords[0]:
@@ -134,12 +140,10 @@ def mover_taxi(destino):
         elif current_position[1] > destino_coords[1]:
             current_position[1] = (current_position[1] - 1) % 20
 
-        movement_status = "RUN"  # Establecer el estado de movimiento dentro de la función
         actualizar_posicion_taxi(current_position)
-        print(f"Taxi en la posición: {current_position[0]}.{current_position[1]}")
-        sys.stdout.flush()  # Asegurar impresión inmediata
-        time.sleep(0.5)  # Tiempo de espera entre movimientos
-
+        print(f"Taxi {taxi_id} en la posición: {current_position} con movement_status = {'RUN' if movement_event.is_set() else 'STOP'}")
+        sys.stdout.flush()
+        time.sleep(1)
 
 def realizar_viaje(origen, destino, cliente_id):
     global availability_status
@@ -147,7 +151,8 @@ def realizar_viaje(origen, destino, cliente_id):
     mover_taxi(origen)
     print(f"Taxi {taxi_id} ha llegado a la posición de origen {origen}.")
 
-    # No modificar el `movement_status` aquí
+    # Notificar a la central que el cliente ha sido recogido
+    notify_pickup(cliente_id)
 
     print(f"Taxi {taxi_id} comenzando viaje hacia el destino {destino}...")
     mover_taxi(destino)
@@ -163,6 +168,20 @@ def realizar_viaje(origen, destino, cliente_id):
     availability_status = "AVAILABLE"
     enviar_estado()
 
+def notify_pickup(cliente_id):
+    message = {
+        "customer_id": cliente_id,
+        "taxi_id": taxi_id,
+        "status": "PICKED_UP",
+        "mensaje": f"Taxi {taxi_id} ha recogido al cliente {cliente_id}."
+    }
+    try:
+        producer.send('trip_status', value=message)
+        producer.flush()
+        print(f"Notificado a central que el cliente {cliente_id} ha sido recogido.")
+    except Exception as e:
+        print(f"Error al notificar recogida del cliente: {e}")
+
 
 def notify_trip_completion(cliente_id, destination):
     message = {
@@ -170,7 +189,7 @@ def notify_trip_completion(cliente_id, destination):
         "taxi_id": taxi_id,
         "status": "TRIP_COMPLETED",
         "mensaje": f"Taxi {taxi_id} ha completado el viaje para el cliente {cliente_id}.",
-        "destination": destination  # Include the destination
+        "destination": destination
     }
     try:
         producer.send('trip_status', value=message)
@@ -179,9 +198,8 @@ def notify_trip_completion(cliente_id, destination):
     except Exception as e:
         print(f"Error al notificar finalización de viaje: {e}")
 
-
 def recibir_datos_sensor():
-    global movement_status
+    global movement_event
     previous_status = None
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         print("Intentando vincular el sensor:")
@@ -204,15 +222,16 @@ def recibir_datos_sensor():
                             print(f"Datos recibidos del sensor: {data}")
                             previous_status = data
 
-                        if data in ["KO", "r", "p"] and movement_status != "STOP":
-                            movement_status = "STOP"
-                            enviar_estado()
-                            print(f"Estado de movimiento cambiado a STOP y enviado a la central.")
-
-                        elif data == "o" and movement_status == "STOP":
-                            movement_status = "RUN"
-                            enviar_estado()
-                            print(f"Estado de movimiento cambiado a RUN y enviado a la central.")
+                        if data in ["KO", "r", "p"]:
+                            if movement_event.is_set():
+                                movement_event.clear()
+                                enviar_estado()
+                                print(f"Estado de movimiento cambiado a STOP y enviado a la central.")
+                        elif data == "o":
+                            if not movement_event.is_set():
+                                movement_event.set()
+                                enviar_estado()
+                                print(f"Estado de movimiento cambiado a RUN y enviado a la central.")
         
         except Exception as e:
             print(f"Error al vincular el sensor en {sensor_ip}:{sensor_port}: {e}")
